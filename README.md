@@ -115,5 +115,5 @@ The challenge dataset is not included. To re-run the pipeline, see [docs/REPRODU
 ## Author
 
 **Bhargavi S**
-[LinkedIn](https://www.linkedin.com/in/ergocoder/)
+[LinkedIn](https://www.linkedin.com/in/ergocoder/)  
 Email - ergo.bhargavi@gmail.com
