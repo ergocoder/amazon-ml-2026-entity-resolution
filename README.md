@@ -1,123 +1,117 @@
-# NC4: Business Entity Resolution (TF-IDF blocking + LightGBM)
+# Business Entity Resolution at Scale — Amazon ML Challenge 2026
 
-This folder regenerates both submission files, `output/candidate_pairs.tsv` and `output/matching_results.tsv`, from the challenge data. The approach is explained in `Documentation_template.md` at the root of the zip. This file only covers how to run it.
+**Matching millions of messy business records across three data sources, on a 16 GB laptop, in 3 days.**
 
-Final version: **v5**. 46 features, LightGBM, then a per-entity expected-F0.5 decoder. Validation F0.5 0.9428 (the previous version, v4, scored 0.9366 on validation and 0.9238 on the public leaderboard).
-
-## Environment
-
-- Python 3.11, CPU only. No GPU, no internet access and no external data are needed.
-- Tested on Windows 10/11, Intel i7, 16 GB RAM. 16 GB is enough, but close other heavy programs while blocking and training run.
-- Install the pinned dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-Main libraries: pandas, numpy, scikit-learn (TF-IDF), rapidfuzz (string similarity), anyascii (transliteration), lightgbm.
-
-## Expected folder layout
-
-The scripts use relative paths. Run all commands from this folder (`code/business_entity_resolution/`), with the challenge `dataset/` folder two levels up:
-
-```
-<root>/
-├── dataset/
-│   ├── train/   train_source1.tsv, train_source2.tsv, train_source3.tsv, train_ground_truth.tsv
-│   └── test/    test_source1.tsv, test_source2.tsv, test_source3.tsv
-├── output/      (both TSVs are written here)
-└── code/business_entity_resolution/
-    ├── README.md
-    ├── requirements.txt
-    ├── work/    (created automatically, holds intermediate pickles)
-    └── src/
-```
-
-If your data is somewhere else, pass its path with `--data` in steps 1 and 2 and update `DATA` in the notebook's load cell.
-
-## Files in `src/`
-
-| File | What it does |
+| | |
 |---|---|
-| `normalize.py` | Cleans names and addresses: transliteration, lowercasing, legal-suffix removal, address abbreviations, number parts. Builds the text used for blocking. |
-| `blocking.py` | TF-IDF candidate generation per country: top-20 candidates per Source 1 record, plus the top-3 Source 1 records for each Source 2/3 record, with word-pair tokens. |
-| `run_test_blocking.py` | Runs normalization + blocking on train or test and saves the results to `work/`. |
-| `features.py` | The 31 base pair features (`context_features`, `string_features`), `assign()` (each Source 2/3 record to at most one Source 1), and `f05_macro()` (the official metric). Used by v5 unchanged. |
-| `features_v5.py` | The 15 v5 features on top of the 31 base ones (46 in total). |
-| `decode_f05.py` | The expected-F0.5 decoder: for each Source 1 record, picks the set of candidates with the highest expected F0.5, instead of using one global threshold. |
-| `predict_test_v5.py` | **Final prediction script.** Scores the test candidates with `lgbm_v5.txt`, decodes with `decode_f05.py`, and writes both output files. |
-| `lgbm_v5.txt` | The trained final model (LightGBM text format). |
-| `explore.ipynb` | Data exploration, error analysis, and the training cells for all versions. |
-| `predict_test.py`, `lgbm_v4.txt` | Previous version (v4, threshold 0.7). `predict_test_v5.py` reuses its file writer. |
-| `apply_decoder.py` | Re-decodes saved v4 probabilities with the decoder (v4 + decoder). Kept for reference. |
-| `features_v3.py`, `predict_test_v3.py`, `lgbm_v3.txt` | Older version, kept for reference only. |
-| `check_addr_blocking.py` | Address-only blocking experiment (not adopted). Not needed to reproduce the outputs. |
+| **Final score** | F0.5 = **0.93** on the leaderboard (validation 0.943) |
+| **Progress** | 0.778 → 0.920 → 0.925 → 0.93 across four submitted versions |
+| **Rank** | ~3,100 *(fill in: out of N teams)* |
+| **Team** | NC4 (4 members). I built this pipeline independently; it became the team's final submission. |
+| **Stack** | Python, pandas, scikit-learn (TF-IDF), RapidFuzz, LightGBM, anyascii |
+| **Hardware** | Windows laptop, Intel i7, 16 GB RAM, CPU only |
 
-## Quick reproduction (using the included model)
+---
 
-The trained model `src/lgbm_v5.txt` is included, so you can skip training and regenerate the outputs in two steps.
+## The problem
 
-**1. Block the test set** (normalization + candidate generation, roughly an hour on our laptop):
+Large platforms receive information about the same business from many places, and the records never share an ID. One source says *"Sharma Traders Pvt Ltd, Near SBI ATM, MG Rd"*, another says *"SHARMA TRADERS PRIVATE LIMITED, Mahatma Gandhi Road, 400601"*, and a third has the name written in Devanagari. Deciding which records describe the same real business is called **entity resolution**.
 
-```bash
-python src/run_test_blocking.py --data ../../dataset --k 20 --split test
+The challenge gave three sources:
+
+- **Source 1**: a clean reference list of businesses (1.7 million in the test set)
+- **Sources 2 and 3**: noisy records, each of which matches at most one Source 1 business, or none (about 25% match nothing)
+
+For every Source 1 business, the task was to list all its matching records from Sources 2 and 3.
+
+**What made it hard:**
+- **Noise everywhere**: abbreviations (Pvt / Private, Rd / Road), legal suffixes, typos, word reordering, landmark-based addresses, missing PIN codes, and names in Indian scripts.
+- **Some names are gibberish**, so those records can only be matched by address.
+- **Scale**: comparing every pair is impossible, so a candidate-generation ("blocking") step is required, and it caps the best achievable recall.
+- **An unseen country**: training data covered the US and India, but the test set also included **France**.
+- **A precision-heavy metric**: F0.5, averaged per business. A wrong merge costs about twice as much as a missed match, and predicting a match for a business that has none scores 0 for that business.
+- **No external data**: no geocoding, APIs or lookups were allowed.
+
+---
+
+## Approach
+
+```mermaid
+flowchart LR
+    A[3 raw sources] --> B[Normalize<br/>transliterate, expand abbreviations,<br/>strip legal suffixes]
+    B --> C[Blocking<br/>TF-IDF per country<br/>~48M candidate pairs]
+    C --> D[46 pair features<br/>string similarity, postal codes,<br/>competition among candidates]
+    D --> E[LightGBM<br/>match probability]
+    E --> F[Decoder<br/>pick the set that maximizes<br/>expected F0.5 per business]
+    F --> G[Final matches]
 ```
 
-This writes `work/test_s1.pkl`, `work/test_idx.pkl` and `work/test_cand.pkl` (about 48.2M candidate pairs).
+**1. Normalization.** All text is transliterated to Latin script (so Hindi and Marathi names line up with their English spellings), lowercased, and cleaned. Legal suffixes are removed, and common address abbreviations are expanded.
 
-**2. Score, decode and write the outputs:**
+**2. Blocking (candidate generation).** For each country separately, names and addresses are turned into TF-IDF vectors of words and word pairs. Each Source 1 business keeps its 20 most similar records, and each Source 2/3 record also nominates its 3 most similar Source 1 businesses (this "reverse" direction recovered matches the forward pass missed). This keeps **95.8%** of the true matches while reducing the comparisons to about 28 per business. Because blocking runs per country label, France needed no special handling.
 
-```bash
-python src/predict_test_v5.py --out ../../output
+**3. Features (46 per candidate pair).**
+- *String similarity*: several RapidFuzz scores and TF-IDF cosine for names and addresses
+- *Address details*: postal-code agreement or conflict, house-number match
+- *Context*: how a candidate compares with the other candidates of the same business, how many Source 1 businesses share the same name, and whether a candidate looks like an even better fit for a different business
+
+**4. Model.** A LightGBM classifier predicts the probability that each pair is a true match. Each Source 2/3 record is then assigned to at most one Source 1 business.
+
+**5. Decoding for F0.5.** Instead of a single global probability cutoff, the final step chooses, for each business, the set of candidates with the highest *expected* F0.5 given the model's probabilities. This includes deciding confidently to predict "no match".
+
+---
+
+## How the score improved, and what I learned
+
+| Version | What changed | Validation | Leaderboard |
+|---|---|---|---|
+| v1 | First end-to-end pipeline, 28 features | 0.962 | **0.778** |
+| v2 | Rebuilt validation on full-size data | 0.79 | — |
+| v3 | Better blocking: word pairs + reverse direction | 0.933 | 0.920 |
+| v4 | Same-name ambiguity features (31 total) | 0.937 | 0.925 |
+| v5 | 15 competition-aware features + F0.5 decoder (46 total) | 0.943 | **0.93** |
+
+**The biggest lesson came from v1: the validation score was lying.** v1 scored 0.96 on validation but 0.78 on the leaderboard. The cause: to save time, I had validated on a 10% sample of the training data. With fewer businesses, each one had far fewer competing look-alike candidates, so the model looked much more precise than it really was. After rebuilding validation on the full-size data (v2), validation tracked the leaderboard to within about 1 point for every later version. That made each later improvement trustworthy before submitting.
+
+**Error analysis decided v4 and v5.** Instead of guessing what to try next, I measured where the points were lost:
+- Missed matches cost 0.035, wrong matches 0.018, and blocking misses 0.015 (so 0.985 was the ceiling).
+- Records with an **empty address** were only 3.3% of the data but caused about a quarter of all errors.
+- About half of the wrong matches were cases where **two different businesses had exactly the same name** and the model picked the wrong one.
+
+v4 added features that measure that same-name ambiguity directly. v5 went further and made features *relative*: how much better a candidate is than the business's other candidates, and how it compares with its strongest rival. Those relative features turned out to be the most important in the final model.
+
+**What didn't work:**
+- An address-only blocking pass to recover the empty-name records. It added too many wrong candidates for the recall it gained, so it was not adopted.
+- The F0.5 decoder gave a clear gain on v4, but almost nothing on v5 (+0.0001), because the v5 model's probabilities were already well separated. It was kept because it is never worse.
+
+**Where the remaining gap is:** the top teams reached about 0.99. The largest remaining losses are missed matches and the 4.2% of true matches that blocking never surfaces, especially for Indian records (blocking recall 93.7% vs 97.2% for the US).
+
+---
+
+## Repository layout
+
+```
+src/
+  normalize.py           text cleaning and transliteration
+  blocking.py            TF-IDF candidate generation
+  run_test_blocking.py   runs normalization + blocking on train or test
+  features.py            31 base pair features + assignment + F0.5 metric
+  features_v5.py         15 additional v5 features
+  decode_f05.py          expected-F0.5 decoder
+  predict_test_v5.py     final prediction script
+  lgbm_v5.txt            trained final model
+  explore.ipynb          exploration, error analysis, training
+docs/
+  REPRODUCE.md           exact commands to regenerate the submission
+  METHODOLOGY.md         full technical write-up submitted to the challenge
 ```
 
-It uses `src/lgbm_v5.txt` and the decoder settings `--gamma 1.15 --floor 0.05` by default. It prints progress per batch of Source 1 records and ends with a `done in ...s | ... matches | ...% S1 with no match` line. It also saves the test probabilities to `work/test_scored_v5.pkl`.
+The v4 version is kept as the git tag `v4`, and the final version as `v5`.
 
-Both `candidate_pairs.tsv` and `matching_results.tsv` are now in `output/`.
+The challenge dataset is not included. To re-run the pipeline, see [docs/REPRODUCE.md](docs/REPRODUCE.md).
 
-## Full reproduction (retraining the model)
+---
 
-To retrain from scratch, run these before step 2 above.
+## Author
 
-**A. Block the training set** (about 65 minutes, 56.4M candidate pairs):
-
-```bash
-python src/run_test_blocking.py --data ../../dataset --k 20 --split train
-```
-
-This writes `work/train_s1.pkl`, `work/train_idx.pkl` and `work/train_cand.pkl`. The expected summary line is `done: 56,388,107 pairs`.
-
-**B. Train the model in `src/explore.ipynb`.** Restart the kernel first, then run only these v5 cells, in this order. Each is identified by its first line:
-
-| Order | Cell (first line) | What it does |
-|---|---|---|
-| 1 | `import numpy as np, pandas as pd, gc` | Loads the train pickles and ground truth |
-| 2 | `del gt, true_tr, s1p, ixp` | Frees memory before the features step |
-| 3 | `from features import string_features, assign, f05_macro` | Builds the 46 v5 features and labels (the slow cell) |
-| 4 | `import lightgbm as lgb` (the cell ending in `model.save_model("lgbm_v5.txt")`) | Trains LightGBM and saves `lgbm_v5.txt` |
-| 5 | `from decode_f05 import sweep` | Validation: threshold 0.7 vs the decoder, and top features by gain |
-
-Skip all other cells (exploration, the v4 cells and error analysis).
-
-Expected output: the features cell prints `8,452,803 pairs | 46 features (should be 46)`. Training stops early at 140 rounds with validation log-loss about 0.0287. The last cell shows F0.5 about 0.9427 at threshold 0.7 and about 0.9428 with the decoder at gamma 1.15, floor 0.05.
-
-Training details: validation is the Source 1 entities with position % 20 == 0, so the split is by entity, not by pair. Context features are computed on the full 56.4M candidate set. String features are computed on 15% of Source 1 entities (position % 20 < 3) to keep runtime manageable. Every Source 1 entity in that sample keeps all of its candidates, which the within-entity v5 features need.
-
-**C. Restart or close the notebook kernel** to free RAM, then run steps 1 and 2 of the quick reproduction.
-
-## Validate the output
-
-From the challenge's `student_resource/` folder:
-
-```bash
-python utils/validate_submission.py --matching output/matching_results.tsv --candidate output/candidate_pairs.tsv --test-dir dataset/test
-```
-
-It should print `PASS`.
-
-## Notes
-
-- Country is treated as an open label. Blocking runs separately for every country present in the data, so France (test only) needs no special code.
-- No external APIs, geocoding or web lookups are used anywhere in the pipeline.
-- LightGBM is MIT licensed and the model is trained from scratch on the provided training data. No pretrained models are used.
-- Blocking and prediction run in chunks to stay within 16 GB RAM. If you run out of memory, close the notebook kernel and other programs before running the scripts.
+**Bhargavi S** · *(add LinkedIn / email)*
