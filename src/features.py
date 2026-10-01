@@ -29,6 +29,8 @@ FEATURE_COLS = CTX_COLS + STR_COLS
 
 
 def _jaccard(a: set, b: set) -> float:
+    """Word overlap of two sets: shared / total distinct (0 to 1).
+    Returns -1 if either set is empty."""
     if not a or not b:
         return -1.0  # -1 = "can't tell" (one side empty); LightGBM handles this fine
     return len(a & b) / len(a | b)
@@ -92,6 +94,8 @@ def string_features(f: pd.DataFrame, s1: pd.DataFrame, index: pd.DataFrame,
     a2 = index["addr_n"].to_numpy()[f["cand_pos"]]
 
     def job_iter():
+        """Yield the pairs in pieces of `chunk` rows, each a list of
+        (name1, addr1, name2, addr2) tuples for one worker job."""
         for i in range(0, len(f), chunk):
             yield list(zip(n1[i:i + chunk], a1[i:i + chunk], n2[i:i + chunk], a2[i:i + chunk]))
 

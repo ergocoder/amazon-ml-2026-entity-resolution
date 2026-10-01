@@ -77,6 +77,8 @@ _DIGIT_RUN = re.compile(r"\d+")
 
 
 def _to_ascii(s: str) -> str:
+    """Convert any script (Hindi, Kannada, accented French...) to plain Latin letters.
+    Uses anyascii if installed, otherwise only strips accents. Returns the new string."""
     if anyascii is not None:
         return anyascii(s)
     return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
@@ -111,12 +113,16 @@ def _base_tokens(s: str) -> list:
 
 
 def normalize_name(s: str) -> str:
+    """Clean a raw business name: basic cleanup, then drop legal words (pvt, llc, inc...)
+    and "and" unless nothing else is left. Returns space-separated tokens."""
     toks = _base_tokens(s)
     core = [t for t in toks if t not in LEGAL_WORDS and t != "and"]
     return " ".join(core if core else toks)
 
 
 def normalize_address(s: str) -> str:
+    """Clean a raw address: basic cleanup, unify abbreviations (rd -> road) and state
+    names (Alabama -> al), drop filler words (unit, flat...). Returns space-separated tokens."""
     out = []
     for t in _base_tokens(s):
         t = ADDR_ABBREV.get(t, t)
@@ -136,6 +142,8 @@ def number_parts(addr_norm: str) -> list:
 
 
 def _normalize_row(pair):
+    """Normalize one (raw name, raw address) pair. Returns (name_n, addr_n, block_text),
+    where block_text = name + address + number parts, used for blocking."""
     name, addr = pair
     n, a = normalize_name(name), normalize_address(addr)
     block_text = " ".join([n, a] + number_parts(a))

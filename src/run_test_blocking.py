@@ -28,6 +28,8 @@ def load_norm(path, n_jobs, step=1_000_000):
 
 
 def main():
+    """Normalize S1 and S2+S3 of one split (--split test/train), run blocking, and save
+    {split}_s1.pkl, {split}_idx.pkl and {split}_cand.pkl to --out."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default="../../dataset")
     ap.add_argument("--out", default="work")

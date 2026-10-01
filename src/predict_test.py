@@ -31,6 +31,8 @@ def write_lists(path, header2, s1_ids, pairs, cand_ids):
 
 
 def main():
+    """Load the test pickles and the model, score every candidate pair, pick matches
+    at --threshold, and write candidate_pairs.tsv + matching_results.tsv to --out."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--work", default="work")
     ap.add_argument("--model", default="src/lgbm_v4.txt")
