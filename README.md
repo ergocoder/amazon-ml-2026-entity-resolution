@@ -6,8 +6,8 @@
 |---|---|
 | **Final score** | F0.5 = **0.93** on the leaderboard (validation 0.943) |
 | **Progress** | 0.778 → 0.920 → 0.925 → 0.93 across four submitted versions |
-| **Rank** | ~3,100 *(fill in: out of N teams)* |
-| **Team** | NC4 (4 members). I built this pipeline independently; it became the team's final submission. |
+| **Rank** | ~3,100 out of ~10,650 teams |
+| **Team** | NC4 (4 members). This pipeline was built independently; it became the team's final submission. |
 | **Stack** | Python, pandas, scikit-learn (TF-IDF), RapidFuzz, LightGBM, anyascii |
 | **Hardware** | Windows laptop, Intel i7, 16 GB RAM, CPU only |
 
@@ -114,4 +114,4 @@ The challenge dataset is not included. To re-run the pipeline, see [docs/REPRODU
 
 ## Author
 
-**Bhargavi S** · *(add LinkedIn / email)*
+**Bhargavi S** · [LinkedIn](https://www.linkedin.com/in/ergocoder/) · [Email](ergo.bhargavi@gmail.com)
