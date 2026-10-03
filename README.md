@@ -6,7 +6,7 @@
 |---|---|
 | **Final score** | F0.5 = **0.93** on the leaderboard (validation 0.943) |
 | **Progress** | 0.778 → 0.920 → 0.925 → 0.93 across four submitted versions |
-| **Rank** | ~3,116 out of ~10,650 teams |
+| **Rank** | ~3,116 out of ~10,650 teams ~Top 30% of participating teams |
 | **Team** | NC4 (4 members) |
 | **Stack** | Python, pandas, scikit-learn (TF-IDF), RapidFuzz, LightGBM, anyascii |
 | **Hardware** | Windows laptop, Intel i7, 16 GB RAM, CPU only |
